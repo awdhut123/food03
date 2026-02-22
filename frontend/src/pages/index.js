@@ -1,0 +1,11 @@
+export { default as Home } from './Home';
+export { default as Login } from './Login';
+export { default as Register } from './Register';
+export { default as Restaurants } from './Restaurants';
+export { default as RestaurantDetail } from './RestaurantDetail';
+export { default as Cart } from './Cart';
+export { default as Orders } from './Orders';
+export { default as OrderTracking } from './OrderTracking';
+export { default as AdminDashboard } from './AdminDashboard';
+export { default as RestaurantDashboard } from './RestaurantDashboard';
+export { default as DeliveryDashboard } from './DeliveryDashboard';
