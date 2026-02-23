@@ -50,6 +50,14 @@ public class OrderService {
     public OrderResponse createOrder(Long userId, CreateOrderRequest request) {
         log.info("Creating order for user: {} at restaurant: {}", userId, request.getRestaurantId());
 
+        // Validate inputs
+        if (request.getItems() == null || request.getItems().isEmpty()) {
+            throw new IllegalArgumentException("Order must contain at least one item");
+        }
+        if (request.getRestaurantId() == null) {
+            throw new IllegalArgumentException("Restaurant ID is required");
+        }
+
         // Create order
         Order order = Order.builder()
                 .userId(userId)
@@ -62,13 +70,20 @@ public class OrderService {
         // Add order items
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (OrderItemRequest itemRequest : request.getItems()) {
+            if (itemRequest.getMenuItemId() == null) {
+                throw new IllegalArgumentException("Menu item ID is required for each order item");
+            }
+            if (itemRequest.getQuantity() == null || itemRequest.getQuantity() < 1) {
+                throw new IllegalArgumentException("Quantity must be at least 1 for each order item");
+            }
+
             BigDecimal itemPrice = BigDecimal.valueOf(10.00); // In real app, fetch from restaurant service
             BigDecimal subtotal = itemPrice.multiply(BigDecimal.valueOf(itemRequest.getQuantity()));
             
             OrderItem orderItem = OrderItem.builder()
                     .order(order)
                     .menuItemId(itemRequest.getMenuItemId())
-                    .menuItemName(itemRequest.getMenuItemName())
+                    .menuItemName(itemRequest.getMenuItemName() != null ? itemRequest.getMenuItemName() : "Item-" + itemRequest.getMenuItemId())
                     .quantity(itemRequest.getQuantity())
                     .price(itemPrice)
                     .subtotal(subtotal)
@@ -79,29 +94,46 @@ public class OrderService {
         }
         
         order.setTotalAmount(totalAmount);
-        Order savedOrder = orderRepository.save(order);
-        log.info("Order created with id: {}", savedOrder.getId());
 
-        // Send order created event via Kafka (async notification)
+        // Save order to DB first — order exists regardless of payment outcome
+        Order savedOrder;
+        try {
+            savedOrder = orderRepository.save(order);
+            log.info("Order saved to DB with id: {}", savedOrder.getId());
+        } catch (Exception e) {
+            log.error("Failed to save order to DB: {}", e.getMessage(), e);
+            throw new IllegalStateException("Failed to create order: " + e.getMessage());
+        }
+
+        // Send order created event via Kafka (async notification — never fails the request)
         sendOrderEvent(savedOrder, "ORDER_CREATED");
 
         // Create Stripe Checkout Session via payment service
-        String baseUrl = "http://localhost:5173";
-        PaymentRequest paymentRequest = PaymentRequest.builder()
-                .orderId(savedOrder.getId())
-                .userId(userId)
-                .amount(totalAmount)
-                .paymentMethod(request.getPaymentMethod())
-                .successUrl(baseUrl + "/payment-success?orderId=" + savedOrder.getId() + "&session_id={CHECKOUT_SESSION_ID}")
-                .cancelUrl(baseUrl + "/payment-cancel?orderId=" + savedOrder.getId())
-                .build();
-
-        PaymentResponse paymentResponse = paymentServiceClient.createCheckoutSession(paymentRequest);
-        log.info("Checkout session created for order: {} url: {}", savedOrder.getId(), paymentResponse.getCheckoutUrl());
-
         OrderResponse response = mapToResponse(savedOrder);
-        response.setCheckoutUrl(paymentResponse.getCheckoutUrl());
-        response.setSessionId(paymentResponse.getSessionId());
+        try {
+            String baseUrl = "http://localhost:5173";
+            PaymentRequest paymentRequest = PaymentRequest.builder()
+                    .orderId(savedOrder.getId())
+                    .userId(userId)
+                    .amount(totalAmount)
+                    .paymentMethod(request.getPaymentMethod() != null ? request.getPaymentMethod() : "CARD")
+                    .successUrl(baseUrl + "/payment-success?orderId=" + savedOrder.getId() + "&session_id={CHECKOUT_SESSION_ID}")
+                    .cancelUrl(baseUrl + "/payment-cancel?orderId=" + savedOrder.getId())
+                    .build();
+
+            PaymentResponse paymentResponse = paymentServiceClient.createCheckoutSession(paymentRequest);
+            log.info("Checkout session created for order: {} url: {}", savedOrder.getId(), paymentResponse.getCheckoutUrl());
+
+            if (paymentResponse != null) {
+                response.setCheckoutUrl(paymentResponse.getCheckoutUrl());
+                response.setSessionId(paymentResponse.getSessionId());
+            }
+        } catch (Exception e) {
+            log.error("Failed to create checkout session for order {}: {}", savedOrder.getId(), e.getMessage(), e);
+            // Order is already saved — return it without checkout URL
+            // The customer can retry payment later
+        }
+
         return response;
     }
 
