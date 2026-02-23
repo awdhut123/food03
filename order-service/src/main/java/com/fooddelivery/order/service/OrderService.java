@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import java.util.List;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,6 +30,22 @@ public class OrderService {
     private final DeliveryServiceClient deliveryServiceClient;
     private final OrderEventProducer orderEventProducer;
 
+    // Valid status transitions: key = current status, value = set of allowed next statuses
+    private static final Map<OrderStatus, Set<OrderStatus>> VALID_TRANSITIONS;
+    static {
+        Map<OrderStatus, Set<OrderStatus>> map = new EnumMap<>(OrderStatus.class);
+        map.put(OrderStatus.PENDING, EnumSet.of(OrderStatus.PAID, OrderStatus.CANCELLED));
+        map.put(OrderStatus.CREATED, EnumSet.of(OrderStatus.PAID, OrderStatus.CONFIRMED, OrderStatus.CANCELLED));
+        map.put(OrderStatus.PAID, EnumSet.of(OrderStatus.CONFIRMED, OrderStatus.CANCELLED));
+        map.put(OrderStatus.CONFIRMED, EnumSet.of(OrderStatus.PREPARING, OrderStatus.CANCELLED));
+        map.put(OrderStatus.PREPARING, EnumSet.of(OrderStatus.READY_FOR_PICKUP, OrderStatus.CANCELLED));
+        map.put(OrderStatus.READY_FOR_PICKUP, EnumSet.of(OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED));
+        map.put(OrderStatus.OUT_FOR_DELIVERY, EnumSet.of(OrderStatus.DELIVERED));
+        map.put(OrderStatus.DELIVERED, EnumSet.noneOf(OrderStatus.class));
+        map.put(OrderStatus.CANCELLED, EnumSet.noneOf(OrderStatus.class));
+        VALID_TRANSITIONS = Collections.unmodifiableMap(map);
+    }
+
     @Transactional
     public OrderResponse createOrder(Long userId, CreateOrderRequest request) {
         log.info("Creating order for user: {} at restaurant: {}", userId, request.getRestaurantId());
@@ -38,7 +54,7 @@ public class OrderService {
         Order order = Order.builder()
                 .userId(userId)
                 .restaurantId(request.getRestaurantId())
-                .status(OrderStatus.CREATED)
+                .status(OrderStatus.PENDING)
                 .deliveryAddress(request.getDeliveryAddress())
                 .specialInstructions(request.getSpecialInstructions())
                 .build();
@@ -118,14 +134,15 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found with id: " + orderId));
 
-        if (order.getStatus() != OrderStatus.CREATED) {
-            // Already confirmed or in another state
+        // Accept PENDING or CREATED (backward compat) → mark as PAID
+        if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.CREATED) {
+            // Already paid/confirmed or in another state — return as-is
             return mapToResponse(order);
         }
 
-        order.setStatus(OrderStatus.CONFIRMED);
+        order.setStatus(OrderStatus.PAID);
         orderRepository.save(order);
-        log.info("Order {} confirmed after payment", orderId);
+        log.info("Order {} marked as PAID after payment", orderId);
 
         sendOrderEvent(order, "PAYMENT_SUCCESSFUL");
 
@@ -137,9 +154,18 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException("Order not found with id: " + orderId));
 
+        // Validate the status transition
+        OrderStatus currentStatus = order.getStatus();
+        Set<OrderStatus> allowed = VALID_TRANSITIONS.getOrDefault(currentStatus, EnumSet.noneOf(OrderStatus.class));
+        if (!allowed.contains(newStatus)) {
+            throw new IllegalStateException(
+                    String.format("Cannot transition order %d from %s to %s. Allowed transitions: %s",
+                            orderId, currentStatus, newStatus, allowed));
+        }
+
         order.setStatus(newStatus);
         Order updatedOrder = orderRepository.save(order);
-        log.info("Order {} status updated to: {}", orderId, newStatus);
+        log.info("Order {} status updated from {} to {}", orderId, currentStatus, newStatus);
 
         // Send status update event
         sendOrderEvent(updatedOrder, "ORDER_STATUS_UPDATED");

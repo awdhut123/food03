@@ -4,7 +4,8 @@ import { toast } from 'react-toastify';
 import { orderAPI, deliveryAPI } from '../services/api';
 
 const STEPS = [
-  { key: 'CREATED', label: 'Order Placed', icon: '📋' },
+  { key: 'PENDING', label: 'Order Placed', icon: '📋' },
+  { key: 'PAID', label: 'Paid', icon: '💳' },
   { key: 'CONFIRMED', label: 'Confirmed', icon: '✅' },
   { key: 'PREPARING', label: 'Preparing', icon: '👨‍🍳' },
   { key: 'READY_FOR_PICKUP', label: 'Ready for Pickup', icon: '📦' },
@@ -208,7 +209,7 @@ const OrderTracking = () => {
       )}
 
       {/* Cancel button */}
-      {!isCancelled && currentStep < 2 && (
+      {!isCancelled && currentStep < 3 && (
         <button
           onClick={handleCancelOrder}
           className="w-full py-3 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors font-medium"

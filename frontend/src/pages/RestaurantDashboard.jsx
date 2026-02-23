@@ -157,7 +157,7 @@ const RestaurantDashboard = () => {
     try {
       await orderAPI.updateStatus(orderId, status);
       const messages = {
-        CONFIRMED: 'Order confirmed',
+        CONFIRMED: 'Order confirmed by restaurant',
         PREPARING: 'Order is being prepared',
         READY_FOR_PICKUP: 'Order marked as ready for pickup. Delivery agent will be notified.',
       };
@@ -170,7 +170,9 @@ const RestaurantDashboard = () => {
 
   const getOrderStatusColor = (status) => {
     const colors = {
+      PENDING: 'bg-gray-100 text-gray-700',
       CREATED: 'bg-blue-100 text-blue-700',
+      PAID: 'bg-emerald-100 text-emerald-700',
       CONFIRMED: 'bg-teal-100 text-teal-700',
       PREPARING: 'bg-yellow-100 text-yellow-700',
       READY_FOR_PICKUP: 'bg-orange-100 text-orange-700',
@@ -183,7 +185,8 @@ const RestaurantDashboard = () => {
 
   const getOrderAction = (order) => {
     switch (order.status) {
-      case 'CREATED':
+      case 'PAID':
+        return { label: 'Confirm Order', status: 'CONFIRMED', color: 'bg-teal-500 hover:bg-teal-600' };
       case 'CONFIRMED':
         return { label: 'Start Preparing', status: 'PREPARING', color: 'bg-yellow-500 hover:bg-yellow-600' };
       case 'PREPARING':

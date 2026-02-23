@@ -22,6 +22,10 @@ spring:
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer
       value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  cloud:
+    openfeign:
+      circuitbreaker:
+        enabled: true
 
 eureka:
   client:
@@ -29,11 +33,6 @@ eureka:
       defaultZone: http://localhost:8761/eureka/
   instance:
     prefer-ip-address: true
-
-# OpenFeign configuration
-spring.cloud.openfeign:
-  circuitbreaker:
-    enabled: true
 
 management:
   endpoints:

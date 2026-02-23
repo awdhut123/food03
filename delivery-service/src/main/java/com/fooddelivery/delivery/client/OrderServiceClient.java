@@ -9,5 +9,5 @@ import org.springframework.web.bind.annotation.RequestParam;
 public interface OrderServiceClient {
 
     @PutMapping("/api/orders/{id}/status")
-    void updateOrderStatus(@PathVariable Long id, @RequestParam("status") String status);
+    void updateOrderStatus(@PathVariable("id") Long id, @RequestParam("status") String status);
 }
